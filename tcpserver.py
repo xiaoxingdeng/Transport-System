@@ -13,6 +13,7 @@ sendmap = {}
 window = 20
 mutex = threading.Lock()
 
+
 class Status(Enum):
     LISTEN = 0
     SYNSENT = 1
@@ -27,6 +28,7 @@ def send(data, s, address):
 def newthreadsend(data, s, address):
     sendthread = threading.Thread(target=send, args=(data, s, address))
     sendthread.start()
+
 
 def open_config(filename):
     global configdict
@@ -59,7 +61,7 @@ def openserver():
         datadict = {}
         split_data(data, datadict)
         if datadict["flag"] == 0:
-            threadsend = threading.Thread(target=newrequest,args=(datadict, s, address))
+            threadsend = threading.Thread(target=newrequest, args=(datadict, s, address))
             threadsend.start()
         if datadict["flag"] == 2:
             mutex.acquire()
@@ -70,33 +72,38 @@ def openserver():
             sendmap[address] = -1
             mutex.release()
 
-def newrequest(datadict,s,address):
+
+def newrequest(datadict, s, address):
     sendmap[address] = -2
-    filename =datadict["data"].decode()
-    f =open(filename, 'rb+')
+    filename = datadict["data"].decode()
+    f = open(filename, 'rb+')
     windowstart = 0
     filelength = os.path.getsize(filename)
     while sendmap[address] == -2:
-        s.sendto(formheader(0, 0, 1)+filelength.to_bytes(4, 'big'),address)
-        time.sleep(0.3)
-    while windowstart < filelength:
+        s.sendto(formheader(0, 0, 1) + filelength.to_bytes(4, 'big'), address)
+        time.sleep(0.1)
+    while windowstart < filelength and windowstart != -1:
+        f.seek(windowstart, 0)
         if windowstart + window * 1012 <= filelength:
             windowdata = f.read(window * 1012)
         else:
             windowdata = f.read(filelength - windowstart)
         windowlen = len(windowdata)
         for i in range(window):
-            sequencenum = windowstart + i*1012
-            if i * 1012 <= windowlen-1:
-                if i * 1012 + 1011 <= windowlen-1:
+            sequencenum = windowstart + i * 1012
+            if i * 1012 <= windowlen - 1:
+                if i * 1012 + 1011 <= windowlen - 1:
                     data = windowdata[i * 1012:i * 1012 + 1012]
                 else:
                     data = windowdata[i * 1012:]
-                s.sendto(formheader(sequencenum, 0, 3)+data, address)
-        time.sleep(0.1)
+                s.sendto(formheader(sequencenum, 0, 3) + data, address)
+        time.sleep(0.03)
+        old = windowstart
         mutex.acquire()
         windowstart = sendmap[address]
         mutex.release()
+        if (windowstart - old) < 20 * 1012:
+            print(str(windowstart)+"   "+str(20 * 1012-windowstart + old))
 
 
 def openclient(filename, hostname, port):
@@ -142,17 +149,18 @@ def openclient(filename, hostname, port):
                 # ACK is the required one
                 if datadict["sequence"] == latestack:
                     f.write(datadict["data"])
-                    latestack = latestack+len(datadict["data"])
+                    latestack = latestack + len(datadict["data"])
                     # the file has finished
                     if latestack == filelength:
-                        newthreadsend(formheader(0, latestack, 4), s,  address)
+                        print("finish")
+                        newthreadsend(formheader(0, latestack, 4), s, address)
                         f.close()
-                        break;
+                        break
                     else:
-                        newthreadsend(formheader(0, latestack, 2), s,  address)
+                        newthreadsend(formheader(0, latestack, 2), s, address)
                 # Resend data
                 elif datadict["sequence"] < latestack:
-                    newthreadsend(formheader(0, datadict["sequence"]+len(datadict["data"]), 2), s, address)
+                    newthreadsend(formheader(0, datadict["sequence"] + len(datadict["data"]), 2), s, address)
                 # former miss
                 else:
                     newthreadsend(formheader(0, latestack, 2), s, address)
@@ -165,11 +173,6 @@ def searchfile(filename):
             if file == filename:
                 return item["hostname"], item["port"]
     return None, None
-
-
-
-
-
 
 
 if __name__ == '__main__':
